@@ -31,7 +31,7 @@
         /* หัวข้อ */
         .header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 25px;
         }
         .header h1 {
             color: #00f3ff;
@@ -46,6 +46,34 @@
             font-size: 12px;
         }
 
+        /* ไฟแสดงสถานะการเชื่อมต่อระบบ */
+        .status-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 11px;
+            margin-top: 12px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+        }
+        .status-badge.checking {
+            background: rgba(255, 165, 0, 0.15);
+            color: #ffa500;
+            border: 1px solid rgba(255, 165, 0, 0.3);
+        }
+        .status-badge.connected {
+            background: rgba(0, 255, 100, 0.15);
+            color: #00ff64;
+            border: 1px solid rgba(0, 255, 100, 0.3);
+            box-shadow: 0 0 10px rgba(0, 255, 100, 0.2);
+        }
+        .status-badge.disconnected {
+            background: rgba(255, 50, 50, 0.15);
+            color: #ff3232;
+            border: 1px solid rgba(255, 50, 50, 0.3);
+        }
+
         /* กล่องแต่ละแชนเนล */
         .channel-row {
             background: rgba(255, 255, 255, 0.03);
@@ -55,6 +83,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
         
         .channel-info {
@@ -125,6 +154,7 @@
         <div class="header">
             <h1>SMART HOME</h1>
             <p>ESP8266 IoT Control Panel</p>
+            <div id="db-status" class="status-badge checking">🔄 กำลังตรวจสอบสถานะ...</div>
         </div>
 
         <div class="channel-row">
@@ -175,27 +205,39 @@
     </div>
 
     <script type="module">
-        // 1. นำเข้า Firebase SDK
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-        // 2. ตั้งค่า Firebase Config 
+        // คอนฟิกหลักของโปรเจกต์ myiot2026
         const firebaseConfig = {
             apiKey: "AIzaSyCotwsHXPohDq45MS_XGpF6Nc_IdtZkhk4",
             authDomain: "myiot2026-29f47.firebaseapp.com",
-            // ⚠️ เพิ่ม databaseURL ตรงนี้เพื่อให้ Real-time Database ทำงานได้อย่างสมบูรณ์
-            databaseURL: "https://myiot2026-29f47-default-rtdb.firebaseio.com", 
             projectId: "myiot2026-29f47",
             storageBucket: "myiot2026-29f47.firebasestorage.app",
             messagingSenderId: "895684866223",
-            appId: "1:895684866223:web:14c1e8fd99560c58f3645a"
+            appId: "1:895684866223:web:14c1e8fd99560c58f3645a",
+            databaseURL: "https://myiot2026-29f47-default-rtdb.firebaseio.com"
         };
 
-        // 3. เริ่มต้นการทำงานของ Firebase
+        // เริ่มต้นการทำงาน
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // 4. สร้างฟังก์ชันเชื่อมปุ่มกับฐานข้อมูล
+        // --- ระบบเช็คสถานะการเชื่อมต่อแบบ Real-time ---
+        const connectedRef = ref(db, ".info/connected");
+        const statusElement = document.getElementById("db-status");
+
+        onValue(connectedRef, (snap) => {
+            if (snap.val() === true) {
+                statusElement.innerText = "● เชื่อมต่อ Firebase สำเร็จ";
+                statusElement.className = "status-badge connected";
+            } else {
+                statusElement.innerText = "○ ขาดการเชื่อมต่อ (เช็ค databaseURL)";
+                statusElement.className = "status-badge disconnected";
+            }
+        });
+
+        // --- ระบบควบคุมสวิตช์ไฟ ---
         const channels = [
             { id: 'ch1', dbPath: 'SmartHome/D1' },
             { id: 'ch2', dbPath: 'SmartHome/D2' },
@@ -207,18 +249,23 @@
             const toggleElement = document.getElementById(channel.id);
             const dbRef = ref(db, channel.dbPath);
 
-            // เมื่อมีการเปลี่ยนแปลงข้อมูลใน Firebase (เช่น บอร์ด ESP8266 อัปเดตสถานะ)
+            // อ่านค่าจาก Firebase มาแสดงผลบนหน้าเว็บสวิตช์
             onValue(dbRef, (snapshot) => {
                 const state = snapshot.val();
+                // รองรับทั้งค่าที่เป็น true, เลข 1 หรือตัวหนังสือ "ON"
                 toggleElement.checked = (state === true || state === 1 || state === "ON");
             });
 
-            // เมื่อผู้ใช้กดคลิกเปิด-ปิดสวิตช์บนหน้าเว็บ
+            // เมื่อกดคลิกเปลี่ยนสถานะสวิตช์บนเว็บ ให้ส่งข้อมูลไปเก็บใน Firebase
             toggleElement.addEventListener('change', (event) => {
                 const isChecked = event.target.checked;
-                set(dbRef, isChecked)
-                    .then(() => console.log(`${channel.id} set to ${isChecked}`))
-                    .catch((error) => console.error("Error updating database:", error));
+                
+                // ส่งค่าเป็น 1 (เปิด) หรือ 0 (ปิด) เพื่อให้บอร์ด ESP8266 นำไปใช้งานได้ง่ายที่สุด
+                const valueToSend = isChecked ? 1 : 0;
+
+                set(dbRef, valueToSend)
+                    .then(() => console.log(`อัปเดตแชนเนล ${channel.id} สำเร็จ -> ค่าคือ: ${valueToSend}`))
+                    .catch((error) => console.error("เกิดข้อผิดพลาดในการบันทึกข้อมูล:", error));
             });
         });
     </script>
